@@ -1,0 +1,215 @@
+﻿using System;
+using System.IO;
+using System.Data;
+using System.Data.OleDb;      
+using System.Text;
+using System.Configuration;
+using System.Collections;
+using System.Web;
+using System.Web.Security;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Web.UI.WebControls.WebParts;
+using System.Web.UI.HtmlControls;
+using System.Collections.Generic;
+using System.Web.Script.Serialization;
+using System.Reflection;
+using System.Net;
+//using System.Exception;
+public partial class Index : System.Web.UI.Page
+{
+     public  string result;//调试输出
+     Hashtable htWanted = new Hashtable();//缺料表
+     Hashtable htStock = new Hashtable();//库存表
+    
+System.Text.StringBuilder sb = new System.Text.StringBuilder();//调试输出
+   protected void Page_Load(object sender, EventArgs e)
+    {
+     string sql="";
+    //打开数据库
+       DAO.DBEngine dbEn2=new DAO.DBEngine();
+       DAO.Database db2 = dbEn2.OpenDatabase(System.Web.HttpContext.Current.Server.MapPath("./stu.mdb"))
+;
+     //打开库存
+     sql="select SAP_Code,库存合计 from 库存2";
+     DAO.Recordset rsStock = db2.OpenRecordset(sql)
+;  //库存记录
+   while (!rsStock.EOF){
+     htStock.Add(rsStock.Fields["SAP_Code"].Value.ToString(),rsStock.Fields["库存合计"].Value);//库存表 为 料号 库存合计 键值对
+          //循环下一条
+     rsStock.MoveNext();
+   }  //while
+   rsStock.Close();
+   //打开需求表
+   sql="select SAP_Code,需求 from 需求2";
+         Response.Write("<br>上阶"+sql+"记录数:");
+
+   DAO.Recordset rs2 = db2.OpenRecordset(sql)
+;
+        Response.Write(rs2.RecordCount);
+    
+     while (!rs2.EOF){//循环取出 每个产品料号的需求量
+       //取出料号
+       string strKey=rs2.Fields[0].Value.ToString();
+       //取出需求量
+       double dblWanted=(double)rs2.Fields["需求"].Value;
+       
+       
+    //产品也是有库存的，所以，在全部转化为对下级 半阶或原料的需求前，需要计算缺料
+    
+           //本级的需求2018-4-26 晚
+        Response.Write("需求"+strKey+":");
+       
+        Response.Write(dblWanted);
+        Response.Write("库存"+strKey+":");
+       
+        Response.Write(htStock[strKey]);
+          //本级料号 需求 减去 (库存 哈希表 里键值 为 本级 SAP_code的库存)=缺料
+   
+          dblWanted=dblWanted-Convert.ToDouble(htStock[strKey]);
+          if((dblWanted)>0)     //如果需求 大于 库存
+          {
+          htStock[strKey]=0; //库存量 全部消耗掉 变为0
+          //缺料 等于 需求 减 库存合计 缺料进入下一级 消耗
+             //分解到下层 
+           Response.Write("缺料:"+strKey+":");
+          Response.Write(dblWanted);
+           Response.Write("<br>");
+  
+          findChild(strKey,dblWanted);
+          }else{//dblWanted<0需求 小于0，库存合计 大于 需求量 只要 更新 库存，不要计算下一级 消耗量
+         htStock[strKey]=dblWanted;//dblWanted=库存-需求
+           Response.Write("库存减少到:"+strKey+":");
+ 
+           Response.Write(-1*dblWanted);
+           Response.Write("<br>");
+ 
+          }
+ 
+          
+   //  //本级的需求2018-4-26 晚
+         
+           
+           
+           Response.Write("<br>");
+     Response.Write("   循环 取出 下一个产品");
+            Response.Write("<br>");
+ 
+       //循环 取出 下一个产品
+       rs2.MoveNext();
+     }//while
+   rs2.Close();
+
+   db2.Close();
+   //输出
+//  result=sb.ToString();  
+  Response.Write("<br><br> ");
+ 
+        Response.Write("缺料表:<br> ");
+ 
+         ICollection key = htWanted.Keys;
+         // 获取缺料哈希表键的集合 
+         foreach (string k in key)
+         {//输出缺料
+            Response.Write(k + "缺料: " + htWanted[k]);
+            Response.Write("<br>");//打印库存缺料
+         }
+
+   }//page_load
+   
+   
+   //根据 上级的料号，需求量 求出 缺料
+   void findChild(string strKeyParent,double dblWantedParent){
+    string sql="";
+    string strKey="";
+      sb.AppendLine(strKeyParent);//输出料号，调试
+       //打开bom表
+       DAO.DBEngine dbEn=new DAO.DBEngine();
+       DAO.Database db = dbEn.OpenDatabase(System.Web.HttpContext.Current.Server.MapPath("./stu.mdb"))
+;
+      sql="select 上阶料号,SAP_Code,单耗 from bom2 where 上阶料号 LIKE  '"+strKeyParent+"'";
+      Response.Write("<br>上阶"+sql+"记录数:");
+ 
+      DAO.Recordset rs = db.OpenRecordset(sql)
+;
+            
+
+    //     Response.Write("上阶"+strKeyParent+":");
+           Response.Write(rs.RecordCount);
+       Response.Write("父缺料:"+dblWantedParent+"<br>");
+     
+      sb.AppendLine("<ol>");
+      if(rs.RecordCount==0){//如果是原料，没有经过上面循环分解到下级
+          if(htWanted.ContainsKey(strKeyParent)){
+           htWanted[strKeyParent]=dblWantedParent+(double)htWanted[strKeyParent];
+           Response.Write(strKeyParent+ "缺料增加: " +dblWantedParent );
+            Response.Write("<br>");//打印
+            Response.Write(strKeyParent+ "缺料增加后: " + htWanted[strKeyParent]);
+            Response.Write("<br>");//打印
+         
+          //缺料增加
+           }else{
+            htWanted.Add(strKeyParent,dblWantedParent);
+            Response.Write(strKeyParent+ "新增缺料: " + htWanted[strKeyParent]);
+            Response.Write("<br>");//打印
+     
+          //新增缺料品种
+           }//是否 新缺料
+   
+      }else{
+     while (!rs.EOF){//如果 有下级则循环取出，否则 跳过
+       //本级需求转化为下级需求 不需要算 缺料
+      // 本级需求=上级数量*本级单耗
+      double dblWanted=dblWantedParent*(double)rs.Fields["单耗"].Value;
+
+       strKey=rs.Fields["SAP_Code"].Value.ToString();
+       sb.AppendLine("<li>");
+       sb.AppendLine(strKey);//显示料号
+       sb.AppendLine("</li>");
+ 
+       //这里的单耗不能用哈希表，因为，一个code对应不同的上阶，所以不同的单耗
+       //这里对本级子料的需求量等于 传入上级料号 需求量* 本级的 单耗
+       //输出调试
+       Response.Write("需求"+strKey+":");
+       
+        Response.Write(dblWanted);
+        Response.Write("库存"+strKey+":");
+       
+        Response.Write(htStock[strKey]);
+          //本级料号 需求 减去 (库存 哈希表 里键值 为 本级 SAP_code的库存)=缺料
+   
+          dblWanted=dblWanted-Convert.ToDouble(htStock[strKey]);
+           Response.Write("缺料:"+strKey+":");
+ 
+           Response.Write(dblWanted);
+           Response.Write("<br>");
+       
+         // break;
+          if((dblWanted)>0)     //如果缺料 大于 库存
+          {
+          htStock[strKey]=0; //库存量 全部消耗掉 变为0
+          //缺料 等于 需求 减 库存合计 缺料进入下一级 消耗
+       
+          findChild(strKey,dblWanted);
+          }else{//dblWanted<0缺料 小于0，库存合计 大于 需求量 只要 更新 库存，不要计算下一级 消耗量
+         htStock[strKey]=-1*dblWanted;//dblWanted<0
+           Response.Write("库存减少到:"+strKey+":");
+ 
+           Response.Write(-1*dblWanted);
+           Response.Write("<br>");
+ 
+          }
+          
+          
+          //循环取出下个 子料号
+          rs.MoveNext();
+        }//while
+    }// elseif recordsetCout>0
+        //关闭数据库连接
+        rs.Close();
+        db.Close();
+       sb.AppendLine("</ol>");
+    }//find
+ 
+}//class
+
